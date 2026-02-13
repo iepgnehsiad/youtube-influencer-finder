@@ -10,27 +10,23 @@ from datetime import datetime, timedelta
 API_KEY = os.getenv('YOUTUBE_API_KEY')
 YOUTUBE = build('youtube', 'v3', developerKey=API_KEY)
 
-# 针对 Pacdora 优化的精准词库
+# 最终精准词库
 SEARCH_QUERIES = [
-    # 1. 核心标签 (你新增的词)
-    "#designfreelancer", "#packagetrends", "#packagingdesign", "#brandidentity",
-    # 2. 商业与自由职业场景 (精准匹配 Prosumer)
-    "how to present packaging design to clients",
-    "freelance graphic design workflow 2026",
+    "create realistic 3D mockups packaging",
+    "Packaging Design For Beginners tutorial",
+    "Packaging Design with AI prompts",
+    "AI Fast Packaging and Rendering tool",
+    "How to create 3D packaging design",
+    "Best Free Mockup Website for Designers",
+    "freelance graphic design client workflow",
     "packaging design trends 2026",
-    "how to make professional product mockups",
-    "portfolio tips for packaging designers",
-    # 3. 竞品与工具替代
-    "Pacdora vs Adobe Dimension",
-    "Kittl for packaging design business",
-    "Framer for design portfolio website",
-    "best tools for freelance designers",
-    "automatic dieline generator tutorial"
+    "#designfreelancer #packagetrends"
 ]
 
-# 过滤参数：粉丝量 2k-300k，60天活跃
+RELEVANT_KEYWORDS = ['packaging', 'box', 'dieline', 'mockup', 'freelance', 'tutorial', 'branding', '3d', 'ai', 'render', 'design']
+
 MIN_SUBS = 2000
-MAX_SUBS = 500000
+MAX_SUBS = 350000
 RECENT_DAYS = 60 
 
 def extract_email(text):
@@ -39,7 +35,6 @@ def extract_email(text):
     return emails[0] if emails else ""
 
 def is_channel_active(channel_id):
-    """检测 60 天活跃度"""
     try:
         ch_res = YOUTUBE.channels().list(part="contentDetails", id=channel_id).execute()
         uploads_id = ch_res['items'][0]['contentDetails']['relatedPlaylists']['uploads']
@@ -57,29 +52,25 @@ def get_channel_details(channel_id):
         item = res['items'][0]
         subs = int(item['statistics'].get('subscriberCount', 0))
         if not (MIN_SUBS <= subs <= MAX_SUBS): return None
+        desc = item['snippet'].get('description', '').lower()
+        title = item['snippet'].get('title', '').lower()
+        if not any(word in (desc + title) for word in RELEVANT_KEYWORDS): return None
         if not is_channel_active(channel_id): return None
-        
-        desc = item['snippet'].get('description', '')
-        return {
-            'name': item['snippet']['title'],
-            'subs': subs,
-            'email': extract_email(desc),
-            'url': f"https://youtube.com/channel/{channel_id}"
-        }
+        return {'name': item['snippet']['title'], 'subs': subs, 'email': extract_email(desc), 'url': f"https://youtube.com/channel/{channel_id}"}
     except: return None
 
 def main():
     all_data = []
-    output_file = 'output/pacdora_influencer_report.csv'
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    output_file = f'output/pacdora_report_{current_date}.csv'
     
-    # 去重逻辑：读取 my_pool.txt
     existing_ids = set()
     if os.path.exists('my_pool.txt'):
-        with open('my_pool.txt', 'r') as f:
+        with open('my_pool.txt', 'r', encoding='utf-8') as f:
             existing_ids = {line.strip().split('/')[-1] for line in f if line.strip()}
 
     for query in SEARCH_QUERIES:
-        print(f"🔍 正在精准挖掘设计师: {query}")
+        print(f"🔍 挖掘中: {query}")
         try:
             request = YOUTUBE.search().list(q=query, part="snippet", type="video", maxResults=50)
             response = request.execute()
@@ -90,49 +81,36 @@ def main():
                     if details:
                         all_data.append(details)
                         existing_ids.add(cid) 
-        except Exception as e:
-            print(f"搜索出错: {e}")
+        except Exception as e: print(f"API Error: {e}")
 
     if all_data:
         df = pd.DataFrame(all_data)
-        
-        # 邮件模板优化：针对 Pacdora 包装设计与自由职业者
         def generate_pacdora_email(row):
-            name = row['name']
-            email = row['email']
+            name, email = row['name'], row['email']
             if not email: return "#"
-            
-            # 定制化开头：Hi [达人名字]
-            subject = "Paid Collab: Helping your audience speed up 3D packaging work with Pacdora 🚀"
-            body = (
-                f"Hi {name},\n\n"
-                f"I've been following your design workflow and really love how you share practical tips for #designfreelancers. "
-                f"Your recent insights on current #packagetrends are incredibly valuable to the community.\n\n"
-                "I'm Doris from Pacdora. We’ve developed an all-in-one 3D packaging tool that helps designers create professional mockups and dielines in seconds. "
-                "Since many of your viewers are likely looking for ways to improve their client delivery, I believe Pacdora would be a perfect fit for a collab.\n\n"
-                "I’d love to offer you a Premium Membership to test how we can simplify the design-to-render process:\n"
-                "- 3000+ Real Packaging Templates: Instant dielines for any project.\n"
-                "- Real-time 3D Rendering: Perfect for client presentations.\n"
-                "- One-Click 4K Mockups: Studio-quality results without the learning curve of complex 3D software.\n\n"
-                "We are looking for long-term partners for paid sponsorships and affiliate opportunities. If you’re open to a partnership, "
-                "please let me know your rates and your WhatsApp!\n\n"
-                "Best,\nDoris\nPacdora | Marketing Manager"
-            )
-            params = urllib.parse.urlencode({'subject': subject, 'body': body})
-            return f"mailto:{email}?{params}"
+            subject = "Collab: The fastest 3D Packaging & AI Rendering tool for your audience 📦"
+            body = (f"Hi {name},\n\nI really enjoyed your content on design workflows. I'm Doris from Pacdora. "
+                    "We've built an AI-powered 3D packaging tool that helps designers generate 4K mockups and dielines in seconds. "
+                    "I’d love to offer you a Premium Membership to test the tech. Interested? Please reply with your rates.\n\n"
+                    "Best,\nDoris\nPacdora | Marketing Manager")
+            return f"mailto:{email}?{urllib.parse.urlencode({'subject': subject, 'body': body})}"
 
-        df['one_click_email'] = df.apply(generate_pacdora_email, axis=1)
+        df['Action'] = df.apply(generate_pacdora_email, axis=1)
         os.makedirs('output', exist_ok=True)
         df.to_csv(output_file, index=False, encoding='utf-8-sig')
         
-        # 生成 HTML 交互大表 (Pacdora 绿色配色)
-        html_file = 'output/pacdora_dashboard.html'
-        html_df = df.copy()
-        html_df['Action'] = html_df['one_click_email'].apply(
-            lambda x: f'<a href="{x}" style="background:#4CAF50;color:white;padding:8px 15px;text-decoration:none;border-radius:5px;font-family:sans-serif;font-weight:bold;">Send Email</a>' if x != "#" else "No Email"
-        )
-        html_df[['name', 'subs', 'Action', 'url']].to_html(html_file, escape=False, index=False)
-        print(f"✅ 完成！共抓取 {len(df)} 位高相关性博主。")
+        # 生成带时间戳的 HTML
+        html_file = f'output/pacdora_dashboard_{current_date}.html'
+        with open(html_file, 'w', encoding='utf-8') as f:
+            f.write(f"<html><head><style>body{{font-family:sans-serif;padding:20px;}} table{{width:100%;border-collapse:collapse;}} th,td{{padding:12px;border:1px solid #ddd;text-align:left;}} th{{background:#4CAF50;color:white;}} .btn{{background:#4CAF50;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-weight:bold;}}</style></head><body>")
+            f.write(f"<h1>📦 Pacdora Influencer Dashboard</h1>")
+            f.write(f"<p><strong>Report Generated at:</strong> {current_date}</p>") # 显著显示最后更新时间
+            f.write("<table><tr><th>Name</th><th>Subscribers</th><th>Action</th><th>Channel URL</th></tr>")
+            for _, row in df.iterrows():
+                action_btn = f'<a class="btn" href="{row["Action"]}">Send Email</a>' if row["Action"] != "#" else "No Email"
+                f.write(f"<tr><td>{row['name']}</td><td>{row['subs']}</td><td>{action_btn}</td><td><a href='{row['url']}'>View</a></td></tr>")
+            f.write("</table></body></html>")
+        print(f"✅ 完成！结果已保存至 {html_file}")
 
 if __name__ == "__main__":
     main()
