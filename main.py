@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 API_KEY = os.getenv('YOUTUBE_API_KEY')
 YOUTUBE = build('youtube', 'v3', developerKey=API_KEY)
 
-# 【Pacdora 设计师全量词库 - 绝不删减】
+# 【Pacdora 设计师全量词库 - 严格保留】
 SEARCH_QUERIES = [
     "#graphicdesign", "#graphicdesigner", "#designtutorial", "#designwithme", 
     "#redesign", "#designhacks", "#designinspo", "#branding", "#arttok", "#artboard", "#artlog",
@@ -35,55 +35,62 @@ def get_latest_video_date(channel_id):
         last_date = pub_at[:10]
         is_active = datetime.now() - datetime.strptime(last_date, '%Y-%m-%d') <= timedelta(days=RECENT_DAYS)
         return last_date, is_active
-    except: return "Error", False
+    except Exception as e:
+        if "quotaExceeded" in str(e): raise e # 额度问题向上抛出
+        return "Error", False
 
 def main():
     all_data = []
     current_date = datetime.now().strftime('%Y-%m-%d')
     output_excel = f'output/Pacdora_Designer_Leads_{current_date}.xlsx'
     
-    # 自动读取池子去重，节省额度
+    # 自动去重逻辑
     existing_ids = set()
     if os.path.exists('my_pool.txt'):
         with open('my_pool.txt', 'r', encoding='utf-8') as f:
             existing_ids = {line.strip().split('/')[-1] for line in f if line.strip()}
 
-    for query in SEARCH_QUERIES:
-        print(f"🔍 Pacdora 挖掘中: {query}")
-        try:
+    try:
+        for query in SEARCH_QUERIES:
+            print(f"🔍 Pacdora 挖掘中: {query}")
             request = YOUTUBE.search().list(q=query, part="snippet", type="channel", maxResults=50)
             response = request.execute()
             for item in response.get('items', []):
                 cid = item['snippet']['channelId']
                 if cid not in existing_ids:
-                    # 检查活跃度与更新日期
                     last_date, is_active = get_latest_video_date(cid)
                     if is_active:
                         all_data.append({
                             'Influencer': item['snippet']['title'],
                             'Latest_Update': last_date,
+                            'Email': "", # 预留位置供你手动填写
                             'Channel_URL': f"https://youtube.com/channel/{cid}"
                         })
                         existing_ids.add(cid)
-        except Exception as e:
-            if "quotaExceeded" in str(e):
-                print("⚠️ 检测到额度上限，正在保存已抓取的设计师...")
-                break
+    except Exception as e:
+        if "quotaExceeded" in str(e):
+            print("⚠️ 额度已达上限，正在强制保存现有结果...")
+        else:
+            print(f"❌ 运行出错: {e}")
 
+    # 只要搜到了数据，就必须执行保存
     if all_data:
         df = pd.DataFrame(all_data).drop_duplicates(subset=['Influencer'])
         
+        # 生成 Excel 发信链接
         def make_excel_link(row):
-            # 预设 Pacdora 专属发信模板
             subj = urllib.parse.quote("Paid Collab: Helping your design audience with AI 3D Tools")
-            body = urllib.parse.quote(f"Hi {row['Influencer']},\n\nI love your content! I'm Doris from Pacdora...")
-            return f'=HYPERLINK("mailto:?subject={subj}&body={body}", "Click to Email")'
+            body = urllib.parse.quote(f"Hi {row['Influencer']},\n\nI'm Doris from Pacdora...")
+            # 链接不包含 Email，方便你手动在 Excel 里补全后点击
+            return f'=HYPERLINK("mailto:?subject={subj}&body={body}", "Send Email")'
 
         df['One_Click_Action'] = df.apply(make_excel_link, axis=1)
         os.makedirs('output', exist_ok=True)
         # 导出为 Excel 格式
         df.to_excel(output_excel, index=False, engine='openpyxl')
-        print(f"✅ Excel 生成成功: {output_excel}")
+        print(f"✅ 结果已保存至: {output_excel}")
+    else:
+        print("📭 本次运行未发现新达人。")
 
 if __name__ == "__main__":
     main()
