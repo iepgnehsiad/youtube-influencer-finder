@@ -25,7 +25,7 @@ RELEVANT_KEYWORDS = ['packaging', 'box', 'dieline', 'mockup', 'freelance', 'tuto
 MIN_SUBS, MAX_SUBS, RECENT_DAYS = 3000, 550000, 90
 
 def get_latest_video_date(channel_id):
-    """提取该设计师最后视频日期"""
+    """获取该设计师最后视频日期"""
     try:
         ch_res = YOUTUBE.channels().list(part="contentDetails", id=channel_id).execute()
         uploads_id = ch_res['items'][0]['contentDetails']['relatedPlaylists']['uploads']
@@ -36,7 +36,7 @@ def get_latest_video_date(channel_id):
         is_active = datetime.now() - datetime.strptime(last_date, '%Y-%m-%d') <= timedelta(days=RECENT_DAYS)
         return last_date, is_active
     except Exception as e:
-        if "quotaExceeded" in str(e): raise e # 额度问题向上抛出
+        if "quotaExceeded" in str(e): raise e
         return "Error", False
 
 def main():
@@ -53,6 +53,7 @@ def main():
     try:
         for query in SEARCH_QUERIES:
             print(f"🔍 Pacdora 挖掘中: {query}")
+            # 每次搜索消耗 100 点
             request = YOUTUBE.search().list(q=query, part="snippet", type="channel", maxResults=50)
             response = request.execute()
             for item in response.get('items', []):
@@ -62,26 +63,25 @@ def main():
                     if is_active:
                         all_data.append({
                             'Influencer': item['snippet']['title'],
-                            'Latest_Update': last_date,
-                            'Email': "", # 预留位置供你手动填写
+                            'Subs_Level': 'Checking...', # 详情可在 Excel 手动补全
+                            'Latest_Update': last_date, # 记录最后更新日期
+                            'Email': "", 
                             'Channel_URL': f"https://youtube.com/channel/{cid}"
                         })
                         existing_ids.add(cid)
     except Exception as e:
         if "quotaExceeded" in str(e):
-            print("⚠️ 额度已达上限，正在强制保存现有结果...")
+            print("⚠️ API 额度已达上限，正在强制保存现有结果...")
         else:
             print(f"❌ 运行出错: {e}")
 
-    # 只要搜到了数据，就必须执行保存
     if all_data:
         df = pd.DataFrame(all_data).drop_duplicates(subset=['Influencer'])
         
-        # 生成 Excel 发信链接
+        # 针对 Excel 优化的发信公式
         def make_excel_link(row):
-            subj = urllib.parse.quote("Paid Collab: Helping your design audience with AI 3D Tools")
-            body = urllib.parse.quote(f"Hi {row['Influencer']},\n\nI'm Doris from Pacdora...")
-            # 链接不包含 Email，方便你手动在 Excel 里补全后点击
+            subj = urllib.parse.quote("Collab: The fastest 3D Packaging & AI Rendering tool for your audience 📦")
+            body = urllib.parse.quote(f"Hi {row['Influencer']},\n\nI love your design content! I'm Doris from Pacdora. Since you focus on efficient design workflows, I'd love to offer you a premium membership to test our 3D mockup and AI rendering tools...")
             return f'=HYPERLINK("mailto:?subject={subj}&body={body}", "Send Email")'
 
         df['One_Click_Action'] = df.apply(make_excel_link, axis=1)
@@ -89,6 +89,11 @@ def main():
         # 导出为 Excel 格式
         df.to_excel(output_excel, index=False, engine='openpyxl')
         print(f"✅ 结果已保存至: {output_excel}")
+        
+        # 同步更新 ID 池子
+        with open('my_pool.txt', 'a', encoding='utf-8') as f:
+            for cid in existing_ids:
+                f.write(f"https://youtube.com/channel/{cid}\n")
     else:
         print("📭 本次运行未发现新达人。")
 
