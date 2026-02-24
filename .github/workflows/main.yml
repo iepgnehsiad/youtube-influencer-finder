@@ -13,9 +13,12 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4  # 这里已修正
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+
+      - name: Create output directory
+        run: mkdir -p output
 
       - name: Install dependencies
         run: pip install pandas google-api-python-client
@@ -23,7 +26,11 @@ jobs:
       - name: Run Pacdora scan
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        run: python main.py
+        run: |
+          set -e
+          echo "🚀 Starting Pacdora scan..."
+          python main.py 2>&1
+          echo "✅ Pacdora scan completed successfully"
 
       - name: Commit and push changes
         run: |
