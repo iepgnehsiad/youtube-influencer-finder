@@ -113,7 +113,7 @@ def main():
             
             def make_link(row):
                 subj = urllib.parse.quote("Collab Proposal: AI 3D Tools for your Audience")
-                body = urllib.parse.quote(f"Hi {row['Influencer']},\n\nLove your content! I'm Doris from Pacdora...")
+                body = urllib.parse.quote(f"Hi {row['Influencer']},\n\nLove your content! I'm Nemo from Pacdora...")
                 return f'=HYPERLINK("mailto:?subject={subj}&body={body}", "Click to Email")'
 
             df['One_Click_Action'] = df.apply(make_link, axis=1)
