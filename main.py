@@ -7,7 +7,7 @@ import os
 import re
 import urllib.parse
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 def ensure_output_dir():
     output_dir = Path("output")
@@ -18,23 +18,71 @@ def extract_email(text):
     emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', str(text))
     return emails[0] if emails else ""
 
-def get_latest_video_date(youtube, channel_id):
+def get_channel_and_video_stats(youtube, channel_id):
+    """获取频道基础信息、最新视频日期、均播、互动率(ER)和国家"""
     try:
-        ch_res = youtube.channels().list(part="contentDetails", id=channel_id).execute()
-        uploads_id = ch_res['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-        pl_res = youtube.playlistItems().list(part="snippet", playlistId=uploads_id, maxResults=1).execute()
-        if not pl_res['items']: return None, False
+        # 一次性获取 snippet(含标题描述国家), statistics(含订阅数), contentDetails(含播放列表)
+        ch_res = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id).execute()
+        if not ch_res.get('items'): return None
+        
+        ch_item = ch_res['items'][0]
+        subs = int(ch_item['statistics'].get('subscriberCount', 0))
+        country = ch_item['snippet'].get('country', 'Unknown')
+        desc = ch_item['snippet'].get('description', '')
+        title = ch_item['snippet'].get('title', '')
+        
+        uploads_id = ch_item['contentDetails']['relatedPlaylists']['uploads']
+        
+        # 拉取最近 10 个视频用于评估活跃度、均播和 ER
+        pl_res = youtube.playlistItems().list(part="snippet", playlistId=uploads_id, maxResults=10).execute()
+        if not pl_res.get('items'): return None
+        
         pub_at = pl_res['items'][0]['snippet']['publishedAt']
         last_date = pub_at[:10]
-        # 活跃度检查：90天内有更新
-        is_active = datetime.now() - datetime.strptime(last_date, '%Y-%m-%d') <= timedelta(days=90)
-        return last_date, is_active
-    except: return None, False
+        
+        # 严格过滤：要求必须是 2026/1/1 之后发布的新视频
+        is_active = datetime.strptime(last_date, '%Y-%m-%d') >= datetime(2026, 1, 1)
+        if not is_active:
+            return None
+
+        # 提取视频 ID 并批量获取统计数据 (包含播放量、点赞量、评论量)
+        video_ids = [item['snippet']['resourceId']['videoId'] for item in pl_res['items']]
+        vid_res = youtube.videos().list(part="statistics", id=",".join(video_ids)).execute()
+        
+        total_views = 0
+        total_engagements = 0
+        video_count = len(vid_res.get('items', []))
+        
+        for v in vid_res.get('items', []):
+            stats = v.get('statistics', {})
+            views = int(stats.get('viewCount', 0))
+            likes = int(stats.get('likeCount', 0))
+            comments = int(stats.get('commentCount', 0))
+            
+            total_views += views
+            total_engagements += (likes + comments)
+            
+        avg_views = total_views // video_count if video_count > 0 else 0
+        er_percentage = (total_engagements / total_views * 100) if total_views > 0 else 0
+        er_str = f"{er_percentage:.2f}%"
+        
+        return {
+            'title': title,
+            'desc': desc,
+            'subs': subs,
+            'country': country,
+            'last_date': last_date,
+            'avg_views': avg_views,
+            'er': er_str,
+            'er_float': er_percentage
+        }
+    except Exception as e:
+        return None
 
 def main():
     try:
         print("=" * 50)
-        print("🔍 Pacdora Influencer Scanner (1k-100k Subs)")
+        print("🔍 Pacdora Influencer Scanner (Targeted Video Search)")
         print("=" * 50)
         
         api_key = os.getenv('YOUTUBE_API_KEY')
@@ -46,16 +94,26 @@ def main():
         from googleapiclient.discovery import build
         youtube = build('youtube', 'v3', developerKey=api_key)
 
-        # 核心配置
+        # 核心配置：使用长尾词，精准定位目标博主
         SEARCH_QUERIES = [
-            "#graphicdesign", "#graphicdesigner", "#designtutorial", "#designwithme", 
-            "#redesign", "#designhacks", "#designinspo", "#branding", "#arttok",
-            "#readymag", "#kittl", "#framer", "Readymag tutorial", "Kittl design review", 
-            "Framer for designers", "create realistic 3D mockups", "Packaging Design For Beginners", 
-            "How to create 3D packaging", "Best Free Mockup Website for Designers",
-            "designfreelancer", "packagetrends", "freelance graphic design client workflow"
+            "food packaging design", "beverage packaging design", "beauty product mockup", 
+            "personal care packaging dieline", "healthcare packaging design",
+            "create realistic 3D mockups", "Packaging Design For Beginners",
+            "How to create 3D packaging", "Best Free Mockup Website",
+            "pacdora tutorial", "framer packaging design", "kittl mockup tutorial",
+            "graphic design client workflow", "dieline generator"
         ]
-        RELEVANT_KEYWORDS = ['packaging', 'box', 'dieline', 'mockup', 'freelance', 'tutorial', 'branding', '3d', 'ai', 'render', 'design']
+        
+        # 黑名单：排除室内设计、播客、打印、美甲、影视、游戏等无关行业
+        EXCLUDE_KEYWORDS = [
+            'interior', 'home', 'furniture', 'podcast', 'print on demand', 
+            '3d print', 'cinema', 'film', 'tarot', 'nail', 'embroidery', 
+            'game', 'gaming', 'knitting', 'wreath', 'architect', 'entertainment'
+        ]
+        
+        # 核心词：双重验证
+        RELEVANT_KEYWORDS = ['packaging', 'dieline', 'mockup', 'graphic design', 'pacdora', 'freelance']
+        
         MIN_SUBS, MAX_SUBS = 1000, 100000
 
         # 加载去重池子
@@ -70,33 +128,45 @@ def main():
         for query in SEARCH_QUERIES:
             print(f"🔍 Pacdora 挖掘中: {query}")
             try:
-                # 每次查询请求
-                request = youtube.search().list(q=query, part="snippet", type="channel", maxResults=50)
+                # 核心修改: type="video"，通过发布的内容抓取博主
+                request = youtube.search().list(q=query, part="snippet", type="video", maxResults=50)
                 response = request.execute()
                 
                 for item in response.get('items', []):
                     cid = item['snippet']['channelId']
                     if cid in existing_ids: continue
 
-                    ch_req = youtube.channels().list(part="snippet,statistics", id=cid).execute()
-                    if not ch_req['items']: continue
-                    ch_item = ch_req['items'][0]
+                    # 获取详细的频道和视频数据
+                    stats = get_channel_and_video_stats(youtube, cid)
+                    if not stats: continue
                     
-                    subs = int(ch_item['statistics'].get('subscriberCount', 0))
+                    subs = stats['subs']
                     if not (MIN_SUBS <= subs <= MAX_SUBS): continue
                     
-                    last_date, is_active = get_latest_video_date(youtube, cid)
-                    if not is_active: continue
+                    # 均播量门槛限制：低于 1000 直接过滤，节约建联成本
+                    if stats['avg_views'] < 1000: continue
+                    
+                    # 互动率限制：此处可随时取消注释，例如只想要 ER 大于 1% 的博主
+                    # if stats['er_float'] < 1.0: continue
 
-                    desc = ch_item['snippet'].get('description', '').lower()
-                    title = ch_item['snippet'].get('title', '').lower()
-                    if not any(word in (desc + title) for word in RELEVANT_KEYWORDS): continue
+                    desc_lower = stats['desc'].lower()
+                    title_lower = stats['title'].lower()
+                    combined_text = desc_lower + " " + title_lower
+                    
+                    # 黑名单拦截
+                    if any(word in combined_text for word in EXCLUDE_KEYWORDS): continue
+                    
+                    # 核心词双重验证
+                    if not any(word in combined_text for word in RELEVANT_KEYWORDS): continue
 
                     all_data.append({
-                        'Influencer': ch_item['snippet']['title'],
+                        'Influencer': stats['title'],
                         'Subs': subs,
-                        'Latest_Update': last_date,
-                        'Email': extract_email(desc),
+                        'Avg_Views': stats['avg_views'],
+                        'ER': stats['er'],
+                        'Country': stats['country'],
+                        'Latest_Update': stats['last_date'],
+                        'Email': extract_email(stats['desc']),
                         'Channel_URL': f"https://youtube.com/channel/{cid}"
                     })
                     existing_ids.add(cid)
@@ -118,10 +188,13 @@ def main():
 
             df['One_Click_Action'] = df.apply(make_link, axis=1)
             
+            # 重新排列列名，把高价值的 ROI 指标放在前面
+            columns_order = ['Influencer', 'Subs', 'Avg_Views', 'ER', 'Country', 'Latest_Update', 'Email', 'Channel_URL', 'One_Click_Action']
+            df = df[columns_order]
+            
             current_date = datetime.now().strftime('%Y-%m-%d')
             output_file = Path(f"output/Pacdora_Leads_{current_date}.xlsx")
             
-            # 这里使用了 openpyxl 引擎
             df.to_excel(output_file, index=False, engine='openpyxl')
             
             with open(pool_file, 'w', encoding='utf-8') as f:
