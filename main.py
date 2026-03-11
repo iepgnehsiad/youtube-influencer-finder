@@ -148,7 +148,7 @@ def main():
             '3d print', 'cinema', 'film', 'tarot', 'nail', 'embroidery', 
             'game', 'gaming', 'knitting', 'wreath', 'architect', 'entertainment',
             'manufacturer', 'factory', 'printing machine', 'flexible packaging', 'pouch',
-            'sustainable', 'skincare', 'dermatologist', 'makeup'
+            'sustainable', 'skincare', 'dermatologist', 'makeup', 'solutions', 'industrial', 'machinery', 'equipment', 'supplier', 'plastics', 'seal', 'machine'
         ]
         
         # 核心词：双重验证
