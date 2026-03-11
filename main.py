@@ -19,10 +19,10 @@ def extract_email(text):
     return emails[0] if emails else ""
 
 def get_channel_and_video_stats(youtube, channel_id):
-    """获取频道基础信息、最新视频日期、均播、互动率(ER)和国家"""
+    """获取频道基础信息、最新视频日期、均播、互动率(ER)、国家和 Niche"""
     try:
-        # 一次性获取 snippet(含标题描述国家), statistics(含订阅数), contentDetails(含播放列表)
-        ch_res = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id).execute()
+        # 增加 topicDetails 以获取频道的 Niche 分类
+        ch_res = youtube.channels().list(part="snippet,statistics,contentDetails,topicDetails", id=channel_id).execute()
         if not ch_res.get('items'): return None
         
         ch_item = ch_res['items'][0]
@@ -30,6 +30,18 @@ def get_channel_and_video_stats(youtube, channel_id):
         country = ch_item['snippet'].get('country', 'Unknown')
         desc = ch_item['snippet'].get('description', '')
         title = ch_item['snippet'].get('title', '')
+        
+        # 解析 Niche (topicDetails 返回的是维基百科的链接，需要提取最后的词条名)
+        topic_categories = ch_item.get('topicDetails', {}).get('topicCategories', [])
+        niches = []
+        for url in topic_categories:
+            # 提取 URL 最后一部分，解密 URL 编码并替换下划线为空格
+            topic = urllib.parse.unquote(url.split('/')[-1]).replace('_', ' ')
+            # 去掉类似 "(sociology)" 这种后缀让名称更干净
+            topic = re.sub(r'\s*\(.*?\)\s*', '', topic)
+            if topic not in niches:
+                niches.append(topic)
+        niche_str = ", ".join(niches) if niches else "Unknown"
         
         uploads_id = ch_item['contentDetails']['relatedPlaylists']['uploads']
         
@@ -71,6 +83,7 @@ def get_channel_and_video_stats(youtube, channel_id):
             'desc': desc,
             'subs': subs,
             'country': country,
+            'niche': niche_str,
             'last_date': last_date,
             'avg_views': avg_views,
             'er': er_str,
@@ -94,21 +107,48 @@ def main():
         from googleapiclient.discovery import build
         youtube = build('youtube', 'v3', developerKey=api_key)
 
-        # 核心配置：使用长尾词，精准定位目标博主
+        # 核心配置：使用长尾词，精准定位目标博主 (按重点行业与使用场景分类)
         SEARCH_QUERIES = [
-            "food packaging design", "beverage packaging design", "beauty product mockup", 
-            "personal care packaging dieline", "healthcare packaging design",
-            "create realistic 3D mockups", "Packaging Design For Beginners",
-            "How to create 3D packaging", "Best Free Mockup Website",
-            "pacdora tutorial", "framer packaging design", "kittl mockup tutorial",
-            "graphic design client workflow", "dieline generator"
+            # 1. 核心重点行业：食品饮料 (Food & Beverage)
+            "snack packaging design tutorial", 
+            "beverage label design illustrator",
+            "coffee pouch dieline template",
+            "food packaging 3d render process",
+            "drink bottle mockup free",
+
+            # 2. 核心重点行业：美妆个护 (Beauty & Personal Care)
+            "cosmetic tube mockup tutorial",
+            "skincare packaging design process",
+            "perfume bottle 3d mockup",
+            "beauty box dieline illustrator",
+
+            # 3. 核心重点行业：医疗保健 (Healthcare)
+            "supplement bottle packaging design",
+            "pill box dieline template",
+            "medical packaging mockup tutorial",
+
+            # 4. 泛包装设计与刀模基础 (Packaging & Dieline Core)
+            "how to create packaging dielines",
+            "dieline generator software",
+            "illustrator folding carton template",
+            "create realistic 3D packaging mockups",
+            
+            # 5. 竞品与主流软件拦截 (Software & Alternatives)
+            "adobe dimension packaging tutorial",
+            "blender packaging render for beginners",
+            "canva packaging mockup workaround",
+            "yellow images mockup review",
+            "envato elements 3d mockup alternative",
+            "pacdora vs"
         ]
         
-        # 黑名单：排除室内设计、播客、打印、美甲、影视、游戏等无关行业
+        # 黑名单：排除实体包装工厂、普通美妆/护肤科普消费者、以及室内设计、播客、影视、游戏等无关行业
         EXCLUDE_KEYWORDS = [
             'interior', 'home', 'furniture', 'podcast', 'print on demand', 
             '3d print', 'cinema', 'film', 'tarot', 'nail', 'embroidery', 
-            'game', 'gaming', 'knitting', 'wreath', 'architect', 'entertainment'
+            'game', 'gaming', 'knitting', 'wreath', 'architect', 'entertainment',
+            'manufacturer', 'factory', 'printing machine', 'flexible packaging', 'pouch',
+            'sustainable', 'skincare', 'dermatologist', 'makeup'
         ]
         
         # 核心词：双重验证
@@ -146,9 +186,6 @@ def main():
                     # 均播量门槛限制：低于 1000 直接过滤，节约建联成本
                     if stats['avg_views'] < 1000: continue
                     
-                    # 互动率限制：此处可随时取消注释，例如只想要 ER 大于 1% 的博主
-                    # if stats['er_float'] < 1.0: continue
-
                     desc_lower = stats['desc'].lower()
                     title_lower = stats['title'].lower()
                     combined_text = desc_lower + " " + title_lower
@@ -164,6 +201,7 @@ def main():
                         'Subs': subs,
                         'Avg_Views': stats['avg_views'],
                         'ER': stats['er'],
+                        'Niche': stats['niche'],       # 新增的 Niche 字段
                         'Country': stats['country'],
                         'Latest_Update': stats['last_date'],
                         'Email': extract_email(stats['desc']),
@@ -188,8 +226,8 @@ def main():
 
             df['One_Click_Action'] = df.apply(make_link, axis=1)
             
-            # 重新排列列名，把高价值的 ROI 指标放在前面
-            columns_order = ['Influencer', 'Subs', 'Avg_Views', 'ER', 'Country', 'Latest_Update', 'Email', 'Channel_URL', 'One_Click_Action']
+            # 重新排列列名，把高价值的 ROI 指标和 Niche 放在前面
+            columns_order = ['Influencer', 'Subs', 'Avg_Views', 'ER', 'Niche', 'Country', 'Latest_Update', 'Email', 'Channel_URL', 'One_Click_Action']
             df = df[columns_order]
             
             current_date = datetime.now().strftime('%Y-%m-%d')
