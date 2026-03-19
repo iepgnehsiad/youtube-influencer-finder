@@ -21,7 +21,7 @@ def extract_email(text):
 def get_channel_and_video_stats(youtube, channel_id):
     """获取频道基础信息、最新视频日期、均播、互动率(ER)、国家和 Niche"""
     try:
-        # 增加 topicDetails 以获取频道的 Niche 分类
+        # 一次性获取 snippet, statistics, contentDetails, topicDetails
         ch_res = youtube.channels().list(part="snippet,statistics,contentDetails,topicDetails", id=channel_id).execute()
         if not ch_res.get('items'): return None
         
@@ -31,13 +31,11 @@ def get_channel_and_video_stats(youtube, channel_id):
         desc = ch_item['snippet'].get('description', '')
         title = ch_item['snippet'].get('title', '')
         
-        # 解析 Niche (topicDetails 返回的是维基百科的链接，需要提取最后的词条名)
+        # 解析 Niche 分类
         topic_categories = ch_item.get('topicDetails', {}).get('topicCategories', [])
         niches = []
         for url in topic_categories:
-            # 提取 URL 最后一部分，解密 URL 编码并替换下划线为空格
             topic = urllib.parse.unquote(url.split('/')[-1]).replace('_', ' ')
-            # 去掉类似 "(sociology)" 这种后缀让名称更干净
             topic = re.sub(r'\s*\(.*?\)\s*', '', topic)
             if topic not in niches:
                 niches.append(topic)
@@ -57,7 +55,7 @@ def get_channel_and_video_stats(youtube, channel_id):
         if not is_active:
             return None
 
-        # 提取视频 ID 并批量获取统计数据 (包含播放量、点赞量、评论量)
+        # 提取视频 ID 并批量获取统计数据
         video_ids = [item['snippet']['resourceId']['videoId'] for item in pl_res['items']]
         vid_res = youtube.videos().list(part="statistics", id=",".join(video_ids)).execute()
         
@@ -95,7 +93,7 @@ def get_channel_and_video_stats(youtube, channel_id):
 def main():
     try:
         print("=" * 50)
-        print("🔍 Pacdora Influencer Scanner (Targeted Video Search)")
+        print("🔍 Pacdora Influencer Scanner (Pro Version)")
         print("=" * 50)
         
         api_key = os.getenv('YOUTUBE_API_KEY')
@@ -107,48 +105,63 @@ def main():
         from googleapiclient.discovery import build
         youtube = build('youtube', 'v3', developerKey=api_key)
 
-        # 核心配置：使用长尾词，精准定位目标博主 (按重点行业与使用场景分类)
+        # 终极组合策略：原版精准词 + 长尾形态词 + 泛流量大词 + 竞品与AI趋势词
         SEARCH_QUERIES = [
-            # 1. 核心重点行业：食品饮料 (Food & Beverage)
+            # 1. 基础与精准搜索词 (保留核心盘)
+            "food packaging design", 
+            "beverage packaging design", 
+            "beauty product mockup", 
+            "personal care packaging dieline", 
+            "healthcare packaging design",
+            "create realistic 3D mockups", 
+            "Packaging Design For Beginners",
+            "How to create 3D packaging", 
+            "Best Free Mockup Website",
+            "pacdora tutorial", 
+            "framer packaging design", 
+            "kittl mockup tutorial",
+            "graphic design client workflow", 
+            "dieline generator",
+
+            # 2. 泛设计与核心大词 (大浪淘沙，扩大线索基数)
+            "packaging design",
+            "3d mockup tutorial",
+            "dieline tutorial",
+            "freelance graphic designer",
+            "branding identity design",
+            "product packaging ideas",
+
+            # 3. 竞品与主流设计软件 (精准 SaaS 替代/测评目标客群)
+            "canva 3d mockup",
+            "figma packaging plugin",
+            "illustrator 3d packaging",
+            "blender packaging render",
+            "photoshop mockup tutorial",
+            "adobe dimension tutorial",
+            "yellow images mockup alternative",
+            "envato elements mockup",
+
+            # 4. 具体的包装形态长尾词
             "snack packaging design tutorial", 
-            "beverage label design illustrator",
             "coffee pouch dieline template",
-            "food packaging 3d render process",
-            "drink bottle mockup free",
-
-            # 2. 核心重点行业：美妆个护 (Beauty & Personal Care)
             "cosmetic tube mockup tutorial",
-            "skincare packaging design process",
             "perfume bottle 3d mockup",
-            "beauty box dieline illustrator",
-
-            # 3. 核心重点行业：医疗保健 (Healthcare)
             "supplement bottle packaging design",
-            "pill box dieline template",
-            "medical packaging mockup tutorial",
 
-            # 4. 泛包装设计与刀模基础 (Packaging & Dieline Core)
-            "how to create packaging dielines",
-            "dieline generator software",
-            "illustrator folding carton template",
-            "create realistic 3D packaging mockups",
-            
-            # 5. 竞品与主流软件拦截 (Software & Alternatives)
-            "adobe dimension packaging tutorial",
-            "blender packaging render for beginners",
-            "canva packaging mockup workaround",
-            "yellow images mockup review",
-            "envato elements 3d mockup alternative",
-            "pacdora vs"
+            # 5. 热门趋势与 AI 结合
+            "midjourney packaging design",
+            "ai packaging design",
+            "chatgpt graphic design workflow"
         ]
         
-        # 黑名单：排除实体包装工厂、普通美妆/护肤科普消费者、以及室内设计、播客、影视、游戏等无关行业
+        # 最全黑名单：排除实体代工厂、机械设备、大众美妆科普、室内设计、播客、游戏等
         EXCLUDE_KEYWORDS = [
             'interior', 'home', 'furniture', 'podcast', 'print on demand', 
             '3d print', 'cinema', 'film', 'tarot', 'nail', 'embroidery', 
             'game', 'gaming', 'knitting', 'wreath', 'architect', 'entertainment',
             'manufacturer', 'factory', 'printing machine', 'flexible packaging', 'pouch',
-            'sustainable', 'skincare', 'dermatologist', 'makeup', 'solutions', 'industrial', 'machinery', 'equipment', 'supplier', 'plastics', 'seal', 'machine'
+            'sustainable', 'skincare', 'dermatologist', 'makeup',
+            'solutions', 'industrial', 'machinery', 'equipment', 'supplier', 'plastics', 'seal', 'machine'
         ]
         
         # 核心词：双重验证
@@ -168,8 +181,8 @@ def main():
         for query in SEARCH_QUERIES:
             print(f"🔍 Pacdora 挖掘中: {query}")
             try:
-                # 核心修改: type="video"，通过发布的内容抓取博主
-                request = youtube.search().list(q=query, part="snippet", type="video", maxResults=50)
+                # 注意：maxResults 调低到 25，为了配合 30 多个搜索词，避免极速耗尽 API 额度
+                request = youtube.search().list(q=query, part="snippet", type="video", maxResults=25)
                 response = request.execute()
                 
                 for item in response.get('items', []):
@@ -201,7 +214,7 @@ def main():
                         'Subs': subs,
                         'Avg_Views': stats['avg_views'],
                         'ER': stats['er'],
-                        'Niche': stats['niche'],       # 新增的 Niche 字段
+                        'Niche': stats['niche'],
                         'Country': stats['country'],
                         'Latest_Update': stats['last_date'],
                         'Email': extract_email(stats['desc']),
@@ -210,8 +223,10 @@ def main():
                     existing_ids.add(cid)
 
             except Exception as e:
-                if "quotaExceeded" in str(e):
-                    print("⚠️ API 额度已耗尽，保存现有数据...")
+                # 修复后的额度耗尽捕获逻辑
+                error_msg = str(e).lower()
+                if "quota" in error_msg:
+                    print("⚠️ API 额度已耗尽，保存现有数据并安全退出...")
                     break
                 print(f"❌ Query {query} failed: {e}")
 
@@ -226,7 +241,7 @@ def main():
 
             df['One_Click_Action'] = df.apply(make_link, axis=1)
             
-            # 重新排列列名，把高价值的 ROI 指标和 Niche 放在前面
+            # 重新排列列名，把高价值的 ROI 指标放在前面
             columns_order = ['Influencer', 'Subs', 'Avg_Views', 'ER', 'Niche', 'Country', 'Latest_Update', 'Email', 'Channel_URL', 'One_Click_Action']
             df = df[columns_order]
             
